@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Usage monitor · Laya Local</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,500;8..60,700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;1,9..40,400&display=swap" rel="stylesheet" />
@@ -38,11 +39,6 @@
     <div class="actions" style="margin: 0 0 1.1rem;">
       <button type="button" class="primary" id="refreshBtn">Refresh</button>
       <button type="button" class="ghost" id="clearBtn">Clear log</button>
-    </div>
-    <div id="apiKeyRow" hidden style="margin: 0 0 1.1rem;">
-      <label for="apiKey">API key (required to clear log)</label>
-      <input id="apiKey" type="password" spellcheck="false" autocomplete="off" placeholder="Paste key from /api → Keys" />
-      <p class="hint">Same session key as Playground / API. Generate or copy it on the <a href="/api">API integration</a> page.</p>
     </div>
     <div class="err" id="err" hidden></div>
 
@@ -90,9 +86,8 @@
     const fmtMs = (n) => `${Math.round(Number(n || 0)).toLocaleString()} ms`;
     const STORAGE_KEY = "laya_api_key";
     const errEl = document.getElementById("err");
-    const apiKeyEl = document.getElementById("apiKey");
-    const apiKeyRow = document.getElementById("apiKeyRow");
     let authRequired = false;
+    let localApiKey = sessionStorage.getItem(STORAGE_KEY) || "";
 
     function showErr(msg) {
       if (!msg) {
@@ -104,17 +99,23 @@
       errEl.textContent = msg;
     }
 
+    async function loadLocalApiKey() {
+      if (localApiKey) return localApiKey;
+      try {
+        const res = await fetch("/v1/keys/api-key/local");
+        if (!res.ok) return "";
+        const data = await res.json();
+        localApiKey = (data.value || "").trim();
+        if (localApiKey) sessionStorage.setItem(STORAGE_KEY, localApiKey);
+      } catch {
+        /* ignore */
+      }
+      return localApiKey;
+    }
+
     function authHeaders() {
       const headers = {};
-      const key = (apiKeyEl.value || "").trim()
-        || sessionStorage.getItem(STORAGE_KEY)
-        || new URLSearchParams(location.search).get("key")
-        || "";
-      if (key) {
-        headers.Authorization = "Bearer " + key;
-        sessionStorage.setItem(STORAGE_KEY, key);
-        if (!apiKeyEl.value) apiKeyEl.value = key;
-      }
+      if (localApiKey) headers.Authorization = "Bearer " + localApiKey;
       return headers;
     }
 
@@ -123,13 +124,9 @@
         const r = await fetch("/v1/integration");
         const data = await r.json();
         authRequired = !!data.auth_required;
-        apiKeyRow.hidden = !authRequired;
-        if (authRequired && !apiKeyEl.value) {
-          apiKeyEl.value = sessionStorage.getItem(STORAGE_KEY) || "";
-        }
+        if (authRequired) await loadLocalApiKey();
       } catch {
         authRequired = false;
-        apiKeyRow.hidden = true;
       }
     }
 
@@ -259,9 +256,9 @@
       showErr("");
       try {
         if (authRequired) {
-          const key = (apiKeyEl.value || "").trim() || sessionStorage.getItem(STORAGE_KEY) || "";
+          const key = await loadLocalApiKey();
           if (!key) {
-            throw new Error("API key required to clear the log. Paste it above, or generate one on the API page.");
+            throw new Error("API key required to clear the log. Generate one on the API page.");
           }
         }
         const r = await fetch("/v1/usage/clear", {
@@ -276,12 +273,6 @@
       } catch (e) {
         showErr(String(e.message || e));
       }
-    });
-
-    apiKeyEl.addEventListener("change", () => {
-      const key = apiKeyEl.value.trim();
-      if (key) sessionStorage.setItem(STORAGE_KEY, key);
-      else sessionStorage.removeItem(STORAGE_KEY);
     });
 
     refreshAuth();

@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>API integration · Laya Local</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,500;8..60,700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;1,9..40,400&display=swap" rel="stylesheet" />
@@ -342,6 +343,15 @@ Invoke-RestMethod "$base/v1/systemone" -Method Post -Headers $headers -Body $bod
       try {
         const res = await fetch("/v1/integration");
         info = await res.json();
+        if (info.auth_required && !storedApiKey) {
+          try {
+            const keyRes = await fetch("/v1/keys/api-key/local");
+            if (keyRes.ok) {
+              const keyData = await keyRes.json();
+              if (keyData.value) rememberApiKey(keyData.value);
+            }
+          } catch (_) { /* ignore */ }
+        }
         renderSnippets();
         if (info.ngrok && info.ngrok.error) {
           $("tunnelErr").hidden = false;

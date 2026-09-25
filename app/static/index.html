@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Laya Local System One</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,500;8..60,700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;1,9..40,400&display=swap" rel="stylesheet" />
@@ -46,12 +47,6 @@
               <option value="triage">Support triage</option>
             </select>
           </div>
-        </div>
-
-        <div id="apiKeyRow" hidden>
-          <label for="apiKey">API key (required)</label>
-          <input id="apiKey" type="password" spellcheck="false" autocomplete="off" placeholder="Paste key from /api → Keys" />
-          <p class="hint">Generate or copy the key on the <a href="/api">API integration</a> page.</p>
         </div>
 
         <label for="state">State (JSON object or plain text)</label>
@@ -131,6 +126,21 @@
     const $ = (id) => document.getElementById(id);
     const STORAGE_KEY = "laya_api_key";
     let authRequired = false;
+    let localApiKey = sessionStorage.getItem(STORAGE_KEY) || "";
+
+    async function loadLocalApiKey() {
+      if (localApiKey) return localApiKey;
+      try {
+        const res = await fetch("/v1/keys/api-key/local");
+        if (!res.ok) return "";
+        const data = await res.json();
+        localApiKey = (data.value || "").trim();
+        if (localApiKey) sessionStorage.setItem(STORAGE_KEY, localApiKey);
+      } catch (e) {
+        /* ignore — predict will surface auth errors */
+      }
+      return localApiKey;
+    }
 
     function fillPreset(name) {
       const p = PRESETS[name] || PRESETS.guide;
@@ -227,10 +237,7 @@
         const res = await fetch("/v1/integration");
         const data = await res.json();
         authRequired = !!data.auth_required;
-        $("apiKeyRow").hidden = !authRequired;
-        if (authRequired && !$("apiKey").value) {
-          $("apiKey").value = sessionStorage.getItem(STORAGE_KEY) || "";
-        }
+        if (authRequired) await loadLocalApiKey();
       } catch (e) {
         authRequired = false;
       }
@@ -252,10 +259,9 @@
 
         const headers = { "content-type": "application/json" };
         if (authRequired) {
-          const key = ($("apiKey").value || "").trim();
+          const key = await loadLocalApiKey();
           if (!key) throw new Error("API key required. Generate one on the API page.");
           headers.authorization = "Bearer " + key;
-          sessionStorage.setItem(STORAGE_KEY, key);
         }
 
         const res = await fetch("/v1/systemone", {

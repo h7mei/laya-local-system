@@ -26,6 +26,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 INDEX_HTML = STATIC_DIR / "index.html"
 API_HTML = STATIC_DIR / "api.html"
 MONITOR_HTML = STATIC_DIR / "monitor.html"
+FAVICON_SVG = STATIC_DIR / "favicon.svg"
 
 usage_db.init()
 keys.init()
@@ -158,6 +159,11 @@ def _auth_required() -> bool:
     return bool(keys.get_api_key())
 
 
+def _is_loopback(request: Request) -> bool:
+    host = request.client.host if request.client else ""
+    return host in {"127.0.0.1", "::1", "localhost"}
+
+
 def _check_api_auth(authorization: Optional[str]) -> None:
     """Require bearer when an API key is configured."""
     if not keys.api_key_matches(authorization):
@@ -173,6 +179,11 @@ def _require_key_admin(authorization: Optional[str]) -> None:
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(INDEX_HTML, media_type="text/html; charset=utf-8")
+
+
+@app.get("/favicon.ico")
+def favicon() -> FileResponse:
+    return FileResponse(FAVICON_SVG, media_type="image/svg+xml")
 
 
 @app.get("/api")
@@ -199,6 +210,15 @@ def usage_clear(authorization: Optional[str] = Header(default=None)) -> dict[str
 @app.get("/v1/keys")
 def keys_status() -> dict[str, Any]:
     return keys.status()
+
+
+@app.get("/v1/keys/api-key/local")
+def keys_local_api(request: Request) -> dict[str, Any]:
+    """Return the plaintext API key only to loopback clients (local web UI)."""
+    if not _is_loopback(request):
+        raise HTTPException(status_code=403, detail="loopback only")
+    value = keys.get_api_key()
+    return {"configured": bool(value), "value": value or ""}
 
 
 @app.post("/v1/keys/api-key/generate")
