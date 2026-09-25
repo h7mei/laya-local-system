@@ -8,6 +8,7 @@ Guide: [Laya Local System One](https://laplusda.com/en/posts/laya-local-system-o
 
 - Python 3.10+ (this machine has 3.12)
 - Disk space for checkpoints under `.cache/huggingface` (english + multilingual)
+- Optional NVIDIA GPU: CUDA-capable driver + CUDA PyTorch wheel (see GPU setup below)
 
 ## Setup
 
@@ -17,7 +18,8 @@ Guide: [Laya Local System One](https://laplusda.com/en/posts/laya-local-system-o
 cd C:\Users\User\Documents\AAXX\code\laya-local-system
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -I -c "import laya; print(laya.__version__)"
+.\scripts\setup-gpu.ps1   # installs CUDA torch; skip on CPU-only machines
+.\.venv\Scripts\python.exe -I -c "import laya, torch; print(laya.__version__, torch.cuda.is_available())"
 Copy-Item .env.example .env
 ```
 
@@ -27,12 +29,25 @@ Copy-Item .env.example .env
 cd /path/to/laya-local-system
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -I -c "import laya; print(laya.__version__)"
+# NVIDIA GPU (Linux):
+.venv/bin/python -m pip uninstall -y torch
+.venv/bin/python -m pip install torch==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+.venv/bin/python -I -c "import laya, torch; print(laya.__version__, torch.cuda.is_available())"
 cp .env.example .env
 chmod +x scripts/serve.sh
 ```
 
-Optional: set `LAYA_DEVICE=cuda` in `.env` if you have an NVIDIA GPU. Optional: set `HF_TOKEN` for higher Hub rate limits during download. After a successful download you can set `HF_HUB_OFFLINE=1` in `.env` to block network fetches at runtime.
+`.env` defaults to `LAYA_DEVICE=auto` (CUDA when available) and `LAYA_PRELOAD=1`. Set `LAYA_DEVICE=cpu` to force CPU. Optional: set `HF_TOKEN` for higher Hub rate limits. After a successful download you can set `HF_HUB_OFFLINE=1` to block network fetches at runtime.
+
+### GPU setup (NVIDIA)
+
+Plain `pip install torch` from PyPI is **CPU-only**. This repo ships `scripts/setup-gpu.ps1` which installs `torch==2.11.0+cu128` (works with driver CUDA 12.x, including RTX 50-series). Confirm with:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'n/a')"
+```
+
+Expect `True` and your GPU name (e.g. `NVIDIA GeForce RTX 5060 Ti`). Then restart the server — startup logs should show `device=cuda, gpu=...`.
 
 ## Start the server
 
@@ -66,8 +81,8 @@ Defaults (override in `.env`):
 | --- | --- | --- |
 | `LAYA_HOST` | `127.0.0.1` | Bind address |
 | `LAYA_PORT` | `8000` | Port |
-| `LAYA_DEVICE` | `cpu` | Torch device |
-| `LAYA_PRELOAD` | `0` | Lazy-load into RAM (files must already be cached) |
+| `LAYA_DEVICE` | `auto` | `auto` → CUDA if available, else CPU; or set `cuda` / `cpu` |
+| `LAYA_PRELOAD` | `1` | Load checkpoints at startup (recommended on GPU) |
 | `LAYA_MODELS` | `english,multilingual` | Checkpoints checked (and downloaded if missing) before serve |
 | `HF_HOME` | `.cache/huggingface` | Local model cache |
 | `LAYA_API_KEY` | _(unset)_ | If set, require `Authorization: Bearer` on predict |

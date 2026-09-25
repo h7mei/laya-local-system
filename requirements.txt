@@ -1,2 +1,7 @@
+# Core deps. On NVIDIA machines, install the CUDA torch wheel AFTER this file:
+#   Windows:  .\scripts\setup-gpu.ps1
+#   Linux:    .venv/bin/python -m pip uninstall -y torch
+#             .venv/bin/python -m pip install torch==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+# Plain `pip install torch` from PyPI is CPU-only and will not use your GPU.
 laya[serve]==0.3.20
 pyngrok>=7.2.0

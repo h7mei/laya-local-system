@@ -30,8 +30,9 @@ REQUIRED = (
 DEFAULT_ENV = {
     "LAYA_HOST": "127.0.0.1",
     "LAYA_PORT": "8000",
-    "LAYA_DEVICE": "cpu",
-    "LAYA_PRELOAD": "0",
+    # auto = cuda when torch.cuda.is_available(), else cpu
+    "LAYA_DEVICE": "auto",
+    "LAYA_PRELOAD": "1",
     "LAYA_MODELS": ",".join(DEFAULT_MODELS),
 }
 
@@ -50,9 +51,39 @@ def _load_dotenv(path: Path) -> None:
             os.environ[name] = value
 
 
+def _cuda_available() -> bool:
+    try:
+        import torch
+
+        return bool(torch.cuda.is_available())
+    except Exception:
+        return False
+
+
+def _resolve_device(raw: str | None) -> str:
+    """Map LAYA_DEVICE to a concrete torch device string."""
+    value = (raw or "auto").strip().lower() or "auto"
+    if value in {"auto", "gpu"}:
+        return "cuda" if _cuda_available() else "cpu"
+    if value in {"cuda", "cuda:0"}:
+        if not _cuda_available():
+            print(
+                "WARNING: LAYA_DEVICE=cuda but torch.cuda.is_available() is False "
+                "(CPU-only torch wheel or missing NVIDIA driver). Falling back to cpu.\n"
+                "Fix: run .\\scripts\\setup-gpu.ps1 (Windows) or install "
+                "torch from https://download.pytorch.org/whl/cu128",
+                file=sys.stderr,
+            )
+            return "cpu"
+        return value
+    return value
+
+
 def _apply_defaults() -> None:
     for key, value in DEFAULT_ENV.items():
         os.environ.setdefault(key, value)
+
+    os.environ["LAYA_DEVICE"] = _resolve_device(os.environ.get("LAYA_DEVICE"))
 
     hf_home = os.environ.get("HF_HOME") or str(DEFAULT_CACHE)
     hf_path = Path(hf_home)
@@ -162,7 +193,19 @@ def start_server() -> None:
     port = os.environ["LAYA_PORT"]
     device = os.environ["LAYA_DEVICE"]
     preload = os.environ["LAYA_PRELOAD"]
-    print(f"Starting Laya UI on http://{host}:{port} (device={device}, preload={preload})")
+    gpu_note = ""
+    if device.startswith("cuda") and _cuda_available():
+        try:
+            import torch
+
+            name = torch.cuda.get_device_name(0)
+            gpu_note = f", gpu={name}"
+        except Exception:
+            gpu_note = ""
+    print(
+        f"Starting Laya UI on http://{host}:{port} "
+        f"(device={device}{gpu_note}, preload={preload})"
+    )
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
     from app.server import main as server_main
