@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Laya Local System One</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,500;8..60,700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;1,9..40,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1 class="brand">Laya</h1>
+      <p class="lede">Local System One decisions — choice, score, and noul over any state, without sending data to a managed API.</p>
+      <nav class="nav" aria-label="Primary">
+        <a class="active" href="/">Playground</a>
+        <a href="/api">API integration</a>
+      </nav>
+      <div class="meta">
+        <span class="pill"><span id="healthDot" class="dot"></span><span id="healthText">checking…</span></span>
+        <span class="pill">POST /v1/systemone</span>
+        <span class="pill">lazy checkpoints</span>
+      </div>
+    </header>
+
+    <div class="layout">
+      <section class="panel">
+        <h2>Request</h2>
+        <div class="row">
+          <div>
+            <label for="model">Model</label>
+            <select id="model">
+              <option value="">auto (router)</option>
+              <option value="english">english</option>
+              <option value="multilingual">multilingual</option>
+              <option value="typed-decisions">typed-decisions</option>
+            </select>
+          </div>
+          <div>
+            <label for="preset">Preset</label>
+            <select id="preset">
+              <option value="guide">Guide example</option>
+              <option value="triage">Support triage</option>
+            </select>
+          </div>
+        </div>
+
+        <label for="state">State (JSON object or plain text)</label>
+        <textarea id="state" spellcheck="false"></textarea>
+
+        <label for="questions">Questions (JSON object)</label>
+        <textarea id="questions" spellcheck="false" style="min-height: 14rem;"></textarea>
+
+        <div class="actions">
+          <button type="button" class="primary" id="run">Run decision</button>
+          <button type="button" class="ghost" id="reset">Reset example</button>
+        </div>
+        <p class="hint">Checkpoints are ensured by <code>scripts/serve</code> on start. First predict only loads from disk into RAM.</p>
+        <div class="err" id="err" hidden></div>
+      </section>
+
+      <section class="panel">
+        <h2>Answers</h2>
+        <div id="results" class="answers">
+          <p class="empty">Results appear here after a successful run.</p>
+        </div>
+        <div class="routing" id="routing" hidden></div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const PRESETS = {
+      guide: {
+        state: {
+          subject: "Duplicate charge",
+          body: "I was charged twice and want a refund today."
+        },
+        questions: {
+          department: {
+            type: "choice",
+            instructions: "Which team should handle this ticket?",
+            criteria: {
+              billing: "Payments, invoices, and refunds",
+              support: "Product help and bugs",
+              sales: "New purchases and upgrades"
+            }
+          },
+          refund_requested: {
+            type: "noul",
+            instructions: "Does the customer explicitly request a refund?"
+          }
+        }
+      },
+      triage: {
+        state: {
+          message: "This is the third time I've been billed for a plan I cancelled. Refund today or I switch providers."
+        },
+        questions: {
+          department: {
+            type: "choice",
+            instructions: "Which department should handle this?",
+            criteria: {
+              billing: "invoices, payments, refunds",
+              technical: "bugs, outages, system errors",
+              other: "everything else"
+            }
+          },
+          urgency: {
+            type: "score",
+            instructions: "How urgent is this?",
+            criteria: ["not urgent", "soon", "blocking"]
+          },
+          churn_risk: {
+            type: "noul",
+            instructions: "Does the user threaten to cancel or leave?"
+          }
+        }
+      }
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    function fillPreset(name) {
+      const p = PRESETS[name] || PRESETS.guide;
+      $("state").value = JSON.stringify(p.state, null, 2);
+      $("questions").value = JSON.stringify(p.questions, null, 2);
+      $("err").hidden = true;
+    }
+
+    function parseState(raw) {
+      const text = raw.trim();
+      if (!text) throw new Error("State is empty.");
+      if (text.startsWith("{") || text.startsWith("[")) return JSON.parse(text);
+      return text;
+    }
+
+    function pct(n) {
+      return (Math.max(0, Math.min(1, Number(n) || 0)) * 100);
+    }
+
+    function barRows(rows) {
+      return rows.map(([label, p]) => {
+        const v = pct(p);
+        return `
+          <div class="bar-row">
+            <div class="bar-label" title="${escapeHtml(label)}">${escapeHtml(label)}</div>
+            <div class="track"><div class="fill" style="width:${v.toFixed(1)}%"></div></div>
+            <div class="pct">${v.toFixed(1)}%</div>
+          </div>`;
+      }).join("");
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+
+    function renderAnswer(name, ans) {
+      const type = ans.type || "?";
+      let verdict = "";
+      let rows = [];
+
+      if (type === "choice") {
+        verdict = String(ans.choice ?? "");
+        const probs = ans.probabilities || {};
+        rows = Object.entries(probs).sort((a, b) => b[1] - a[1]);
+      } else if (type === "score") {
+        verdict = String(ans.score ?? "");
+        const probs = ans.probabilities || {};
+        const legend = ans.legend || {};
+        rows = Object.entries(probs).map(([k, v]) => [legend[k] ?? legend[String(k)] ?? String(k), v]);
+      } else if (type === "noul") {
+        const p = Number(ans.noul || 0);
+        verdict = `${(p * 100).toFixed(1)}% yes`;
+        rows = [["true", p], ["false", 1 - p]];
+      } else {
+        verdict = JSON.stringify(ans);
+      }
+
+      const conf = typeof ans.confidence === "number"
+        ? ` · conf ${ans.confidence.toFixed(2)}`
+        : "";
+
+      return `
+        <article class="answer">
+          <div class="answer-head">
+            <div class="answer-name">${escapeHtml(name)}</div>
+            <div class="answer-type">${escapeHtml(type)}${escapeHtml(conf)}</div>
+          </div>
+          <div class="verdict">${escapeHtml(verdict)}</div>
+          ${rows.length ? barRows(rows) : ""}
+        </article>`;
+    }
+
+    async function refreshHealth() {
+      try {
+        const res = await fetch("/health");
+        const data = await res.json();
+        const loaded = Array.isArray(data.loaded) ? data.loaded : [];
+        $("healthDot").className = "dot ok";
+        $("healthText").textContent = data.status === "ok"
+          ? `ok · ${data.device || "auto"} · loaded ${loaded.length ? loaded.join(",") : "none"}`
+          : String(data.status || "unknown");
+      } catch (e) {
+        $("healthDot").className = "dot err";
+        $("healthText").textContent = "server unreachable";
+      }
+    }
+
+    async function run() {
+      $("err").hidden = true;
+      $("run").disabled = true;
+      $("run").textContent = "Running…";
+      $("results").innerHTML = `<p class="empty">Inferring… first call may download a checkpoint.</p>`;
+      $("routing").hidden = true;
+
+      try {
+        const state = parseState($("state").value);
+        const questions = JSON.parse($("questions").value);
+        const body = { state, questions };
+        const model = $("model").value;
+        if (model) body.model = model;
+
+        const res = await fetch("/v1/systemone", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const detail = data.detail || data.message || res.statusText;
+          throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+        }
+
+        const answers = data.answers || {};
+        const keys = Object.keys(answers);
+        $("results").innerHTML = keys.length
+          ? keys.map((k) => renderAnswer(k, answers[k])).join("")
+          : `<p class="empty">No answers returned.</p>`;
+
+        if (data.routing) {
+          $("routing").hidden = false;
+          $("routing").textContent = JSON.stringify(data.routing, null, 2);
+        }
+        refreshHealth();
+      } catch (e) {
+        $("results").innerHTML = `<p class="empty">No results.</p>`;
+        $("err").hidden = false;
+        $("err").textContent = e.message || String(e);
+      } finally {
+        $("run").disabled = false;
+        $("run").textContent = "Run decision";
+      }
+    }
+
+    $("preset").addEventListener("change", () => fillPreset($("preset").value));
+    $("reset").addEventListener("click", () => {
+      $("preset").value = "guide";
+      fillPreset("guide");
+      $("model").value = "";
+      $("results").innerHTML = `<p class="empty">Results appear here after a successful run.</p>`;
+      $("routing").hidden = true;
+    });
+    $("run").addEventListener("click", run);
+
+    fillPreset("guide");
+    refreshHealth();
+  </script>
+</body>
+</html>

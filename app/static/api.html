@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>API integration · Laya Local</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,500;8..60,700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;1,9..40,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1 class="brand">Laya</h1>
+      <p class="lede">Wire your app to this local System One API — copy snippets below, or open a public ngrok URL for remote clients.</p>
+      <nav class="nav" aria-label="Primary">
+        <a href="/">Playground</a>
+        <a class="active" href="/api">API integration</a>
+      </nav>
+      <div class="meta">
+        <span class="pill"><span id="healthDot" class="dot"></span><span id="healthText">checking…</span></span>
+        <span class="pill"><span id="tunnelDot" class="dot"></span><span id="tunnelText">tunnel…</span></span>
+      </div>
+    </header>
+
+    <div class="layout">
+      <section class="panel stack">
+        <h2>How to call the API</h2>
+        <p class="hint" style="margin-top:0">Base URL for examples updates live from this server (local or ngrok).</p>
+
+        <dl class="kv">
+          <dt>Local</dt>
+          <dd id="localUrl">…</dd>
+          <dt>Public</dt>
+          <dd id="publicUrl">not running</dd>
+          <dt>Use this</dt>
+          <dd id="effectiveUrl">…</dd>
+          <dt>Auth</dt>
+          <dd id="authStatus">…</dd>
+        </dl>
+
+        <h3>1. Health check</h3>
+        <div class="code-block">
+          <button type="button" class="copy" data-copy="curlHealth">Copy</button>
+          <pre id="curlHealth"></pre>
+        </div>
+
+        <h3>2. Predict — POST /v1/systemone</h3>
+        <p class="hint">Body: <code>state</code> (any JSON / text) + <code>questions</code> (choice / score / noul). Optional <code>model</code>: english, multilingual, typed-decisions.</p>
+        <div class="code-block">
+          <button type="button" class="copy" data-copy="curlPredict">Copy</button>
+          <pre id="curlPredict"></pre>
+        </div>
+
+        <h3>3. JavaScript fetch</h3>
+        <div class="code-block">
+          <button type="button" class="copy" data-copy="jsFetch">Copy</button>
+          <pre id="jsFetch"></pre>
+        </div>
+
+        <h3>4. PowerShell</h3>
+        <div class="code-block">
+          <button type="button" class="copy" data-copy="psPredict">Copy</button>
+          <pre id="psPredict"></pre>
+        </div>
+
+        <p class="hint">If <code>LAYA_API_KEY</code> is set, send <code>Authorization: Bearer &lt;key&gt;</code> on predict (and tunnel start/stop).</p>
+      </section>
+
+      <section class="panel stack">
+        <h2>Public URL (ngrok)</h2>
+        <p class="hint" style="margin-top:0">Expose this machine so another service can call <code>/v1/systemone</code>.</p>
+
+        <div class="warn-box">
+          A public tunnel shares your local API with the internet. Prefer setting <code>LAYA_API_KEY</code> before enabling ngrok.
+        </div>
+
+        <dl class="kv">
+          <dt>Status</dt>
+          <dd id="ngrokStatus">…</dd>
+          <dt>Token</dt>
+          <dd id="ngrokToken">…</dd>
+          <dt>Autostart</dt>
+          <dd id="ngrokAuto">…</dd>
+        </dl>
+
+        <p class="url-line" id="ngrokUrl">—</p>
+
+        <div class="actions">
+          <button type="button" class="primary" id="startTunnel">Start ngrok</button>
+          <button type="button" class="ghost" id="stopTunnel">Stop</button>
+          <button type="button" class="ghost" id="copyPublic">Copy public URL</button>
+        </div>
+        <div class="err" id="tunnelErr" hidden></div>
+
+        <h3>Enable auto-ngrok</h3>
+        <ol class="hint" style="padding-left:1.1rem">
+          <li>Create a free token at <a href="https://dashboard.ngrok.com/get-started/your-authtoken" target="_blank" rel="noreferrer">ngrok dashboard</a>.</li>
+          <li>Put it in <code>.env</code> as <code>NGROK_AUTHTOKEN=...</code>.</li>
+          <li>Set <code>LAYA_NGROK=1</code> so the tunnel starts with the server.</li>
+          <li>Restart <code>.\scripts\serve.ps1</code> or <code>./scripts/serve.sh</code>.</li>
+        </ol>
+
+        <h3>Endpoints</h3>
+        <ul class="hint" style="padding-left:1.1rem; margin:0">
+          <li><code>GET /health</code> — process status</li>
+          <li><code>POST /v1/systemone</code> — decisions</li>
+          <li><code>GET /v1/integration</code> — base + tunnel info</li>
+          <li><code>POST /v1/tunnel/start</code> — open ngrok</li>
+          <li><code>POST /v1/tunnel/stop</code> — close ngrok</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let info = {
+      base_url: window.location.origin,
+      public_url: null,
+      effective_base_url: window.location.origin,
+      auth_required: false,
+      ngrok: { enabled: false, token_configured: false, autostart: false, error: null }
+    };
+
+    function authHeaderLines(forCurl) {
+      if (!info.auth_required) return { curl: "", js: "", ps: "" };
+      if (forCurl) {
+        return {
+          curl: ` \\\n  -H "Authorization: Bearer $LAYA_API_KEY"`,
+          js: `,\n    headers: {\n      "content-type": "application/json",\n      "authorization": "Bearer " + apiKey\n    }`,
+          ps: `\n$headers["Authorization"] = "Bearer $env:LAYA_API_KEY"`
+        };
+      }
+      return {
+        curl: ` \\\n  -H "Authorization: Bearer $LAYA_API_KEY"`,
+        js: "",
+        ps: ""
+      };
+    }
+
+    function sampleBody() {
+      return `{
+  "state": {
+    "subject": "Duplicate charge",
+    "body": "I was charged twice and want a refund today."
+  },
+  "questions": {
+    "department": {
+      "type": "choice",
+      "instructions": "Which team should handle this ticket?",
+      "criteria": {
+        "billing": "Payments, invoices, and refunds",
+        "support": "Product help and bugs",
+        "sales": "New purchases and upgrades"
+      }
+    },
+    "refund_requested": {
+      "type": "noul",
+      "instructions": "Does the customer explicitly request a refund?"
+    }
+  }
+}`;
+    }
+
+    function renderSnippets() {
+      const base = info.effective_base_url || window.location.origin;
+      const auth = authHeaderLines(true);
+
+      $("localUrl").textContent = info.base_url || window.location.origin;
+      $("publicUrl").textContent = info.public_url || "not running";
+      $("effectiveUrl").textContent = base;
+      $("authStatus").textContent = info.auth_required
+        ? "required (Authorization: Bearer …)"
+        : "none (set LAYA_API_KEY to require a bearer token)";
+
+      $("curlHealth").textContent = `curl -s ${base}/health`;
+
+      $("curlPredict").textContent =
+`curl -s ${base}/v1/systemone \\
+  -H "Content-Type: application/json"${auth.curl} \\
+  -d '${sampleBody().replaceAll("\n", "\n  ")}'`;
+
+      $("jsFetch").textContent =
+`const base = ${JSON.stringify(base)};
+${info.auth_required ? 'const apiKey = process.env.LAYA_API_KEY; // or paste key\n' : ""}const res = await fetch(base + "/v1/systemone", {
+  method: "POST",
+  headers: {
+    "content-type": "application/json"${info.auth_required ? ',\n    "authorization": "Bearer " + apiKey' : ""}
+  },
+  body: JSON.stringify({
+    state: {
+      subject: "Duplicate charge",
+      body: "I was charged twice and want a refund today."
+    },
+    questions: {
+      department: {
+        type: "choice",
+        instructions: "Which team should handle this ticket?",
+        criteria: {
+          billing: "Payments, invoices, and refunds",
+          support: "Product help and bugs",
+          sales: "New purchases and upgrades"
+        }
+      },
+      refund_requested: {
+        type: "noul",
+        instructions: "Does the customer explicitly request a refund?"
+      }
+    }
+  })
+});
+const data = await res.json();
+console.log(data.answers);`;
+
+      $("psPredict").textContent =
+`$base = "${base}"
+$headers = @{ "Content-Type" = "application/json" }${info.auth_required ? '\n$headers["Authorization"] = "Bearer $env:LAYA_API_KEY"' : ""}
+$body = @'
+${sampleBody()}
+'@
+Invoke-RestMethod "$base/v1/systemone" -Method Post -Headers $headers -Body $body`;
+
+      const ng = info.ngrok || {};
+      $("ngrokStatus").textContent = ng.enabled ? "up" : (ng.error ? "error" : "down");
+      $("ngrokToken").textContent = ng.token_configured ? "configured" : "missing NGROK_AUTHTOKEN";
+      $("ngrokAuto").textContent = ng.autostart ? "LAYA_NGROK=1" : "off (start manually or set LAYA_NGROK=1)";
+      $("ngrokUrl").textContent = info.public_url || "No public URL yet";
+
+      $("tunnelDot").className = "dot " + (ng.enabled ? "ok" : (ng.error ? "err" : "warn"));
+      $("tunnelText").textContent = ng.enabled
+        ? "ngrok up"
+        : (ng.token_configured ? "ngrok ready" : "ngrok token missing");
+
+      $("startTunnel").disabled = !ng.token_configured || !!ng.enabled;
+      $("stopTunnel").disabled = !ng.enabled;
+      $("copyPublic").disabled = !info.public_url;
+    }
+
+    async function refreshHealth() {
+      try {
+        const res = await fetch("/health");
+        const data = await res.json();
+        $("healthDot").className = "dot ok";
+        $("healthText").textContent = data.status === "ok"
+          ? `ok · ${data.device || "auto"}`
+          : String(data.status || "unknown");
+      } catch (e) {
+        $("healthDot").className = "dot err";
+        $("healthText").textContent = "server unreachable";
+      }
+    }
+
+    async function refreshIntegration() {
+      try {
+        const res = await fetch("/v1/integration");
+        info = await res.json();
+        renderSnippets();
+        if (info.ngrok && info.ngrok.error) {
+          $("tunnelErr").hidden = false;
+          $("tunnelErr").textContent = info.ngrok.error;
+        } else {
+          $("tunnelErr").hidden = true;
+        }
+      } catch (e) {
+        $("tunnelDot").className = "dot err";
+        $("tunnelText").textContent = "integration unreachable";
+      }
+    }
+
+    async function tunnelAction(path) {
+      $("tunnelErr").hidden = true;
+      $("startTunnel").disabled = true;
+      $("stopTunnel").disabled = true;
+      try {
+        const headers = {};
+        // Optional: if the page was opened with ?key=, use it for tunnel auth.
+        const key = new URLSearchParams(location.search).get("key");
+        if (key) headers.Authorization = "Bearer " + key;
+        const res = await fetch(path, { method: "POST", headers });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const detail = data.detail || res.statusText;
+          throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+        }
+        await refreshIntegration();
+      } catch (e) {
+        $("tunnelErr").hidden = false;
+        $("tunnelErr").textContent = e.message || String(e);
+        await refreshIntegration();
+      }
+    }
+
+    document.querySelectorAll(".copy").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-copy");
+        const text = $(id).textContent;
+        try {
+          await navigator.clipboard.writeText(text);
+          btn.textContent = "Copied";
+          setTimeout(() => { btn.textContent = "Copy"; }, 1200);
+        } catch (e) {
+          btn.textContent = "Failed";
+          setTimeout(() => { btn.textContent = "Copy"; }, 1200);
+        }
+      });
+    });
+
+    $("startTunnel").addEventListener("click", () => tunnelAction("/v1/tunnel/start"));
+    $("stopTunnel").addEventListener("click", () => tunnelAction("/v1/tunnel/stop"));
+    $("copyPublic").addEventListener("click", async () => {
+      if (!info.public_url) return;
+      await navigator.clipboard.writeText(info.public_url);
+      $("copyPublic").textContent = "Copied";
+      setTimeout(() => { $("copyPublic").textContent = "Copy public URL"; }, 1200);
+    });
+
+    renderSnippets();
+    refreshHealth();
+    refreshIntegration();
+  </script>
+</body>
+</html>
