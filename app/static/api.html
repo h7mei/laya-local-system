@@ -270,6 +270,8 @@ Request body shape:
 - state: any JSON object or string (context for the model)
 - questions: object map; each question has type "choice" | "score" | "noul", plus instructions
 - choice questions also need criteria: { optionId: "description", ... }
+- score questions need criteria as a LIST of level strings (index 0 = lowest), e.g. ["low", "medium", "high"] — not an object
+- noul questions usually omit criteria
 - optional model: "english" | "multilingual" | "typed-decisions"
 
 Example POST body:
