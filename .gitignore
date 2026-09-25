@@ -4,6 +4,12 @@
 .env.local
 .env.*.local
 
+# Local usage SQLite DB
+data/
+*.sqlite
+*.sqlite3
+*.db
+
 # Model / Hugging Face cache
 .cache/
 *.safetensors

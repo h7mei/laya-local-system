@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Usage monitor · Laya Local</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,500;8..60,700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;1,9..40,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1 class="brand">Laya</h1>
+      <p class="lede">Local usage monitor — request counts, token totals, latency, and recent predict calls stored in SQLite.</p>
+      <nav class="nav" aria-label="Primary">
+        <a href="/">Playground</a>
+        <a href="/api">API integration</a>
+        <a class="active" href="/monitor">Monitor</a>
+      </nav>
+      <div class="meta">
+        <span class="pill"><span id="healthDot" class="dot"></span><span id="healthText">checking…</span></span>
+        <span class="pill" id="dbPill">SQLite…</span>
+        <span class="pill" id="refreshPill">auto-refresh 10s</span>
+      </div>
+    </header>
+
+    <div class="stat-grid" id="statGrid" aria-live="polite">
+      <div class="stat"><span class="stat-label">Requests</span><span class="stat-value" id="statRequests">—</span></div>
+      <div class="stat"><span class="stat-label">OK / errors</span><span class="stat-value" id="statOkErr">—</span></div>
+      <div class="stat"><span class="stat-label">Input tokens</span><span class="stat-value" id="statInTok">—</span></div>
+      <div class="stat"><span class="stat-label">Output tokens</span><span class="stat-value" id="statOutTok">—</span></div>
+      <div class="stat"><span class="stat-label">Avg latency</span><span class="stat-value" id="statAvg">—</span></div>
+      <div class="stat"><span class="stat-label">Max latency</span><span class="stat-value" id="statMax">—</span></div>
+    </div>
+
+    <div class="actions" style="margin: 0 0 1.1rem;">
+      <button type="button" class="primary" id="refreshBtn">Refresh</button>
+      <button type="button" class="ghost" id="clearBtn">Clear log</button>
+    </div>
+    <div id="apiKeyRow" hidden style="margin: 0 0 1.1rem;">
+      <label for="apiKey">API key (required to clear log)</label>
+      <input id="apiKey" type="password" spellcheck="false" autocomplete="off" placeholder="Paste key from /api → Keys" />
+      <p class="hint">Same session key as Playground / API. Generate or copy it on the <a href="/api">API integration</a> page.</p>
+    </div>
+    <div class="err" id="err" hidden></div>
+
+    <div class="layout">
+      <section class="panel">
+        <h2>Requests by day</h2>
+        <div id="byDay" class="answers">
+          <p class="empty">No usage recorded yet. Run a decision from the playground.</p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>By model</h2>
+        <div id="byModel" class="answers">
+          <p class="empty">No model breakdown yet.</p>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel" style="margin-top: 1.1rem;">
+      <h2>Recent requests</h2>
+      <div class="table-wrap">
+        <table class="usage-table" id="recentTable">
+          <thead>
+            <tr>
+              <th>When (UTC)</th>
+              <th>Status</th>
+              <th>Model</th>
+              <th>Questions</th>
+              <th>Tokens in/out</th>
+              <th>ms</th>
+              <th>Client</th>
+            </tr>
+          </thead>
+          <tbody id="recentBody">
+            <tr><td colspan="7" class="empty">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const fmt = (n) => Number(n || 0).toLocaleString();
+    const fmtMs = (n) => `${Math.round(Number(n || 0)).toLocaleString()} ms`;
+    const STORAGE_KEY = "laya_api_key";
+    const errEl = document.getElementById("err");
+    const apiKeyEl = document.getElementById("apiKey");
+    const apiKeyRow = document.getElementById("apiKeyRow");
+    let authRequired = false;
+
+    function showErr(msg) {
+      if (!msg) {
+        errEl.hidden = true;
+        errEl.textContent = "";
+        return;
+      }
+      errEl.hidden = false;
+      errEl.textContent = msg;
+    }
+
+    function authHeaders() {
+      const headers = {};
+      const key = (apiKeyEl.value || "").trim()
+        || sessionStorage.getItem(STORAGE_KEY)
+        || new URLSearchParams(location.search).get("key")
+        || "";
+      if (key) {
+        headers.Authorization = "Bearer " + key;
+        sessionStorage.setItem(STORAGE_KEY, key);
+        if (!apiKeyEl.value) apiKeyEl.value = key;
+      }
+      return headers;
+    }
+
+    async function refreshAuth() {
+      try {
+        const r = await fetch("/v1/integration");
+        const data = await r.json();
+        authRequired = !!data.auth_required;
+        apiKeyRow.hidden = !authRequired;
+        if (authRequired && !apiKeyEl.value) {
+          apiKeyEl.value = sessionStorage.getItem(STORAGE_KEY) || "";
+        }
+      } catch {
+        authRequired = false;
+        apiKeyRow.hidden = true;
+      }
+    }
+
+    async function pingHealth() {
+      try {
+        const r = await fetch("/health");
+        const j = await r.json();
+        document.getElementById("healthDot").className = "dot ok";
+        const loaded = (j.loaded || []).join(", ") || "none loaded";
+        document.getElementById("healthText").textContent = `${j.status} · ${loaded}`;
+      } catch {
+        document.getElementById("healthDot").className = "dot err";
+        document.getElementById("healthText").textContent = "unreachable";
+      }
+    }
+
+    function renderDay(days) {
+      const root = document.getElementById("byDay");
+      if (!days.length) {
+        root.innerHTML = '<p class="empty">No usage recorded yet. Run a decision from the playground.</p>';
+        return;
+      }
+      const max = Math.max(...days.map((d) => d.requests), 1);
+      root.innerHTML = days.map((d) => {
+        const pct = Math.round((d.requests / max) * 100);
+        return `
+          <div class="answer">
+            <div class="answer-head">
+              <span class="answer-name">${d.day}</span>
+              <span class="answer-type">${fmt(d.requests)} req</span>
+            </div>
+            <div class="bar-row">
+              <span class="bar-label">volume</span>
+              <div class="track"><div class="fill" style="width:${pct}%"></div></div>
+              <span class="pct">${pct}%</span>
+            </div>
+            <p class="hint" style="margin-top:0.45rem">
+              tokens ${fmt(d.input_tokens)} / ${fmt(d.output_tokens)}
+              · errors ${fmt(d.errors)}
+            </p>
+          </div>`;
+      }).join("");
+    }
+
+    function renderModel(rows) {
+      const root = document.getElementById("byModel");
+      if (!rows.length) {
+        root.innerHTML = '<p class="empty">No model breakdown yet.</p>';
+        return;
+      }
+      const max = Math.max(...rows.map((r) => r.requests), 1);
+      root.innerHTML = rows.map((r) => {
+        const pct = Math.round((r.requests / max) * 100);
+        return `
+          <div class="answer">
+            <div class="answer-head">
+              <span class="answer-name">${r.model}</span>
+              <span class="answer-type">${fmt(r.requests)} req</span>
+            </div>
+            <div class="bar-row">
+              <span class="bar-label">share</span>
+              <div class="track"><div class="fill" style="width:${pct}%"></div></div>
+              <span class="pct">${pct}%</span>
+            </div>
+            <p class="hint" style="margin-top:0.45rem">
+              tokens ${fmt(r.input_tokens)} / ${fmt(r.output_tokens)}
+              · avg ${fmtMs(r.avg_duration_ms)}
+            </p>
+          </div>`;
+      }).join("");
+    }
+
+    function renderRecent(rows) {
+      const body = document.getElementById("recentBody");
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="7" class="empty">No requests logged yet.</td></tr>';
+        return;
+      }
+      body.innerHTML = rows.map((r) => {
+        const ok = r.status_code >= 200 && r.status_code < 300;
+        const when = (r.created_at || "").replace("T", " ").replace(/\+00:00$/, "Z");
+        const statusClass = ok ? "ok" : "err";
+        const errHint = r.error ? ` title="${String(r.error).replace(/"/g, "&quot;")}"` : "";
+        return `<tr${errHint}>
+          <td>${when}</td>
+          <td><span class="status-chip ${statusClass}">${r.status_code}</span></td>
+          <td>${r.model || "—"}</td>
+          <td>${fmt(r.question_count)}</td>
+          <td>${fmt(r.input_tokens)} / ${fmt(r.output_tokens)}</td>
+          <td>${Math.round(r.duration_ms || 0)}</td>
+          <td>${r.client_host || "—"}</td>
+        </tr>`;
+      }).join("");
+    }
+
+    async function loadUsage() {
+      showErr("");
+      try {
+        const r = await fetch("/v1/usage?limit=50");
+        if (!r.ok) throw new Error(`usage ${r.status}`);
+        const data = await r.json();
+        const t = data.totals || {};
+        document.getElementById("statRequests").textContent = fmt(t.requests);
+        document.getElementById("statOkErr").textContent = `${fmt(t.ok)} / ${fmt(t.errors)}`;
+        document.getElementById("statInTok").textContent = fmt(t.input_tokens);
+        document.getElementById("statOutTok").textContent = fmt(t.output_tokens);
+        document.getElementById("statAvg").textContent = fmtMs(t.avg_duration_ms);
+        document.getElementById("statMax").textContent = fmtMs(t.max_duration_ms);
+        const path = data.db_path || "data/usage.sqlite";
+        const short = path.split(/[/\\\\]/).slice(-2).join("/");
+        document.getElementById("dbPill").textContent = short;
+        renderDay(data.by_day || []);
+        renderModel(data.by_model || []);
+        renderRecent(data.recent || []);
+      } catch (e) {
+        showErr(String(e.message || e));
+      }
+    }
+
+    document.getElementById("refreshBtn").addEventListener("click", () => {
+      pingHealth();
+      loadUsage();
+    });
+
+    document.getElementById("clearBtn").addEventListener("click", async () => {
+      if (!confirm("Clear all usage rows from SQLite?")) return;
+      showErr("");
+      try {
+        if (authRequired) {
+          const key = (apiKeyEl.value || "").trim() || sessionStorage.getItem(STORAGE_KEY) || "";
+          if (!key) {
+            throw new Error("API key required to clear the log. Paste it above, or generate one on the API page.");
+          }
+        }
+        const r = await fetch("/v1/usage/clear", {
+          method: "POST",
+          headers: authHeaders(),
+        });
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}));
+          throw new Error(j.detail || `clear failed (${r.status})`);
+        }
+        await loadUsage();
+      } catch (e) {
+        showErr(String(e.message || e));
+      }
+    });
+
+    apiKeyEl.addEventListener("change", () => {
+      const key = apiKeyEl.value.trim();
+      if (key) sessionStorage.setItem(STORAGE_KEY, key);
+      else sessionStorage.removeItem(STORAGE_KEY);
+    });
+
+    refreshAuth();
+    pingHealth();
+    loadUsage();
+    setInterval(() => {
+      pingHealth();
+      loadUsage();
+    }, 10000);
+  </script>
+</body>
+</html>

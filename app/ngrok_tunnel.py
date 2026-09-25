@@ -6,6 +6,8 @@ import os
 import threading
 from typing import Any
 
+from app import keys
+
 _lock = threading.Lock()
 _state: dict[str, Any] = {
     "enabled": False,
@@ -24,7 +26,7 @@ def autostart_requested() -> bool:
 
 
 def token_configured() -> bool:
-    return bool((os.environ.get("NGROK_AUTHTOKEN") or "").strip())
+    return bool(keys.get_ngrok_token())
 
 
 def status() -> dict[str, Any]:
@@ -40,10 +42,11 @@ def status() -> dict[str, Any]:
 
 def start(port: int) -> dict[str, Any]:
     """Open an HTTPS ngrok tunnel to the local server port."""
-    token = (os.environ.get("NGROK_AUTHTOKEN") or "").strip()
+    token = keys.get_ngrok_token()
     if not token:
         raise RuntimeError(
-            "NGROK_AUTHTOKEN is not set. Add it to .env from https://dashboard.ngrok.com/get-started/your-authtoken"
+            "NGROK_AUTHTOKEN is not set. Save it on the API page or add it to .env "
+            "from https://dashboard.ngrok.com/get-started/your-authtoken"
         )
 
     with _lock:

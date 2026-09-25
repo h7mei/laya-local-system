@@ -17,6 +17,7 @@
       <nav class="nav" aria-label="Primary">
         <a class="active" href="/">Playground</a>
         <a href="/api">API integration</a>
+        <a href="/monitor">Monitor</a>
       </nav>
       <div class="meta">
         <span class="pill"><span id="healthDot" class="dot"></span><span id="healthText">checking…</span></span>
@@ -45,6 +46,12 @@
               <option value="triage">Support triage</option>
             </select>
           </div>
+        </div>
+
+        <div id="apiKeyRow" hidden>
+          <label for="apiKey">API key (required)</label>
+          <input id="apiKey" type="password" spellcheck="false" autocomplete="off" placeholder="Paste key from /api → Keys" />
+          <p class="hint">Generate or copy the key on the <a href="/api">API integration</a> page.</p>
         </div>
 
         <label for="state">State (JSON object or plain text)</label>
@@ -122,6 +129,8 @@
     };
 
     const $ = (id) => document.getElementById(id);
+    const STORAGE_KEY = "laya_api_key";
+    let authRequired = false;
 
     function fillPreset(name) {
       const p = PRESETS[name] || PRESETS.guide;
@@ -213,6 +222,20 @@
       }
     }
 
+    async function refreshAuth() {
+      try {
+        const res = await fetch("/v1/integration");
+        const data = await res.json();
+        authRequired = !!data.auth_required;
+        $("apiKeyRow").hidden = !authRequired;
+        if (authRequired && !$("apiKey").value) {
+          $("apiKey").value = sessionStorage.getItem(STORAGE_KEY) || "";
+        }
+      } catch (e) {
+        authRequired = false;
+      }
+    }
+
     async function run() {
       $("err").hidden = true;
       $("run").disabled = true;
@@ -227,9 +250,17 @@
         const model = $("model").value;
         if (model) body.model = model;
 
+        const headers = { "content-type": "application/json" };
+        if (authRequired) {
+          const key = ($("apiKey").value || "").trim();
+          if (!key) throw new Error("API key required. Generate one on the API page.");
+          headers.authorization = "Bearer " + key;
+          sessionStorage.setItem(STORAGE_KEY, key);
+        }
+
         const res = await fetch("/v1/systemone", {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers,
           body: JSON.stringify(body)
         });
         const data = await res.json().catch(() => ({}));
@@ -271,6 +302,7 @@
 
     fillPreset("guide");
     refreshHealth();
+    refreshAuth();
   </script>
 </body>
 </html>

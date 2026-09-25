@@ -17,6 +17,7 @@
       <nav class="nav" aria-label="Primary">
         <a href="/">Playground</a>
         <a class="active" href="/api">API integration</a>
+        <a href="/monitor">Monitor</a>
       </nav>
       <div class="meta">
         <span class="pill"><span id="healthDot" class="dot"></span><span id="healthText">checking…</span></span>
@@ -68,13 +69,54 @@
         <p class="hint">If <code>LAYA_API_KEY</code> is set, send <code>Authorization: Bearer &lt;key&gt;</code> on predict (and tunnel start/stop).</p>
       </section>
 
+      <div class="stack">
+      <section class="panel stack">
+        <h2>Keys (SQLite)</h2>
+        <p class="hint" style="margin-top:0">
+          Store <code>LAYA_API_KEY</code> and <code>NGROK_AUTHTOKEN</code> in the local SQLite DB so you can generate and operate them here without editing <code>.env</code>.
+        </p>
+
+        <div class="warn-box">
+          A public tunnel shares your local API with the internet. Prefer generating an API key before enabling ngrok.
+        </div>
+
+        <h3>API key</h3>
+        <dl class="kv">
+          <dt>Status</dt>
+          <dd id="apiKeyStatus">…</dd>
+          <dt>Preview</dt>
+          <dd id="apiKeyMasked">—</dd>
+        </dl>
+        <label for="apiKeyInput">Set or paste API key</label>
+        <input id="apiKeyInput" type="text" spellcheck="false" autocomplete="off" placeholder="Generate, or paste an existing key" />
+        <div class="actions">
+          <button type="button" class="primary" id="genApiKey">Generate</button>
+          <button type="button" class="ghost" id="saveApiKey">Save</button>
+          <button type="button" class="ghost" id="copyApiKey">Copy stored</button>
+          <button type="button" class="ghost" id="clearApiKey">Clear</button>
+        </div>
+        <p class="hint" id="apiKeyReveal" hidden></p>
+
+        <h3>ngrok authtoken</h3>
+        <dl class="kv">
+          <dt>Status</dt>
+          <dd id="ngrokKeyStatus">…</dd>
+          <dt>Preview</dt>
+          <dd id="ngrokKeyMasked">—</dd>
+        </dl>
+        <label for="ngrokTokenInput">Paste ngrok authtoken</label>
+        <input id="ngrokTokenInput" type="password" spellcheck="false" autocomplete="off" placeholder="from dashboard.ngrok.com" />
+        <div class="actions">
+          <button type="button" class="primary" id="saveNgrokToken">Save token</button>
+          <button type="button" class="ghost" id="clearNgrokToken">Clear</button>
+        </div>
+        <p class="hint">Get a free token at <a href="https://dashboard.ngrok.com/get-started/your-authtoken" target="_blank" rel="noreferrer">ngrok dashboard</a>. Values persist in <code>data/usage.sqlite</code>.</p>
+        <div class="err" id="keysErr" hidden></div>
+      </section>
+
       <section class="panel stack">
         <h2>Public URL (ngrok)</h2>
         <p class="hint" style="margin-top:0">Expose this machine so another service can call <code>/v1/systemone</code>.</p>
-
-        <div class="warn-box">
-          A public tunnel shares your local API with the internet. Prefer setting <code>LAYA_API_KEY</code> before enabling ngrok.
-        </div>
 
         <dl class="kv">
           <dt>Status</dt>
@@ -94,11 +136,10 @@
         </div>
         <div class="err" id="tunnelErr" hidden></div>
 
-        <h3>Enable auto-ngrok</h3>
+        <h3>Optional auto-ngrok on boot</h3>
         <ol class="hint" style="padding-left:1.1rem">
-          <li>Create a free token at <a href="https://dashboard.ngrok.com/get-started/your-authtoken" target="_blank" rel="noreferrer">ngrok dashboard</a>.</li>
-          <li>Put it in <code>.env</code> as <code>NGROK_AUTHTOKEN=...</code>.</li>
-          <li>Set <code>LAYA_NGROK=1</code> so the tunnel starts with the server.</li>
+          <li>Save the ngrok token above (or in <code>.env</code> as <code>NGROK_AUTHTOKEN</code>).</li>
+          <li>Set <code>LAYA_NGROK=1</code> in <code>.env</code>.</li>
           <li>Restart <code>.\scripts\serve.ps1</code> or <code>./scripts/serve.sh</code>.</li>
         </ol>
 
@@ -107,22 +148,65 @@
           <li><code>GET /health</code> — process status</li>
           <li><code>POST /v1/systemone</code> — decisions</li>
           <li><code>GET /v1/integration</code> — base + tunnel info</li>
+          <li><code>GET /v1/keys</code> — key status (masked)</li>
           <li><code>POST /v1/tunnel/start</code> — open ngrok</li>
           <li><code>POST /v1/tunnel/stop</code> — close ngrok</li>
         </ul>
       </section>
+      </div>
     </div>
   </div>
 
   <script>
     const $ = (id) => document.getElementById(id);
+    const STORAGE_KEY = "laya_api_key";
+    let storedApiKey = sessionStorage.getItem(STORAGE_KEY) || "";
     let info = {
       base_url: window.location.origin,
       public_url: null,
       effective_base_url: window.location.origin,
       auth_required: false,
+      keys: null,
       ngrok: { enabled: false, token_configured: false, autostart: false, error: null }
     };
+
+    function authHeaders() {
+      const headers = {};
+      const key = storedApiKey || new URLSearchParams(location.search).get("key") || "";
+      if (key) headers.Authorization = "Bearer " + key;
+      return headers;
+    }
+
+    function rememberApiKey(value) {
+      storedApiKey = (value || "").trim();
+      if (storedApiKey) sessionStorage.setItem(STORAGE_KEY, storedApiKey);
+      else sessionStorage.removeItem(STORAGE_KEY);
+    }
+
+    function showKeysErr(msg) {
+      if (!msg) {
+        $("keysErr").hidden = true;
+        $("keysErr").textContent = "";
+        return;
+      }
+      $("keysErr").hidden = false;
+      $("keysErr").textContent = msg;
+    }
+
+    function renderKeys(keysInfo) {
+      const k = keysInfo || info.keys || {};
+      const api = k.api_key || {};
+      const ng = k.ngrok_authtoken || {};
+      $("apiKeyStatus").textContent = api.configured
+        ? `configured (${api.source || "sqlite"})`
+        : "not set";
+      $("apiKeyMasked").textContent = api.masked || "—";
+      $("ngrokKeyStatus").textContent = ng.configured
+        ? `configured (${ng.source || "sqlite"})`
+        : "not set";
+      $("ngrokKeyMasked").textContent = ng.masked || "—";
+      $("copyApiKey").disabled = !storedApiKey;
+    }
 
     function authHeaderLines(forCurl) {
       if (!info.auth_required) return { curl: "", js: "", ps: "" };
@@ -173,7 +257,7 @@
       $("effectiveUrl").textContent = base;
       $("authStatus").textContent = info.auth_required
         ? "required (Authorization: Bearer …)"
-        : "none (set LAYA_API_KEY to require a bearer token)";
+        : "none (generate an API key on this page to require a bearer token)";
 
       $("curlHealth").textContent = `curl -s ${base}/health`;
 
@@ -224,7 +308,7 @@ Invoke-RestMethod "$base/v1/systemone" -Method Post -Headers $headers -Body $bod
 
       const ng = info.ngrok || {};
       $("ngrokStatus").textContent = ng.enabled ? "up" : (ng.error ? "error" : "down");
-      $("ngrokToken").textContent = ng.token_configured ? "configured" : "missing NGROK_AUTHTOKEN";
+      $("ngrokToken").textContent = ng.token_configured ? "configured" : "missing (save token above)";
       $("ngrokAuto").textContent = ng.autostart ? "LAYA_NGROK=1" : "off (start manually or set LAYA_NGROK=1)";
       $("ngrokUrl").textContent = info.public_url || "No public URL yet";
 
@@ -236,6 +320,8 @@ Invoke-RestMethod "$base/v1/systemone" -Method Post -Headers $headers -Body $bod
       $("startTunnel").disabled = !ng.token_configured || !!ng.enabled;
       $("stopTunnel").disabled = !ng.enabled;
       $("copyPublic").disabled = !info.public_url;
+
+      renderKeys(info.keys);
     }
 
     async function refreshHealth() {
@@ -269,16 +355,36 @@ Invoke-RestMethod "$base/v1/systemone" -Method Post -Headers $headers -Body $bod
       }
     }
 
+    async function keysAction(method, path, body) {
+      showKeysErr("");
+      $("apiKeyReveal").hidden = true;
+      try {
+        const opts = { method, headers: { ...authHeaders() } };
+        if (body !== undefined) {
+          opts.headers["content-type"] = "application/json";
+          opts.body = JSON.stringify(body);
+        }
+        const res = await fetch(path, opts);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const detail = data.detail || res.statusText;
+          throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+        }
+        await refreshIntegration();
+        return data;
+      } catch (e) {
+        showKeysErr(e.message || String(e));
+        await refreshIntegration();
+        throw e;
+      }
+    }
+
     async function tunnelAction(path) {
       $("tunnelErr").hidden = true;
       $("startTunnel").disabled = true;
       $("stopTunnel").disabled = true;
       try {
-        const headers = {};
-        // Optional: if the page was opened with ?key=, use it for tunnel auth.
-        const key = new URLSearchParams(location.search).get("key");
-        if (key) headers.Authorization = "Bearer " + key;
-        const res = await fetch(path, { method: "POST", headers });
+        const res = await fetch(path, { method: "POST", headers: authHeaders() });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           const detail = data.detail || res.statusText;
@@ -305,6 +411,73 @@ Invoke-RestMethod "$base/v1/systemone" -Method Post -Headers $headers -Body $bod
           setTimeout(() => { btn.textContent = "Copy"; }, 1200);
         }
       });
+    });
+
+    $("genApiKey").addEventListener("click", async () => {
+      try {
+        const data = await keysAction("POST", "/v1/keys/api-key/generate");
+        if (data && typeof data.generated === "string") {
+          rememberApiKey(data.generated);
+          $("apiKeyInput").value = data.generated;
+          $("apiKeyReveal").hidden = false;
+          $("apiKeyReveal").textContent = "Generated key saved to SQLite and this browser session. Copy it now — only the masked preview is shown later.";
+          renderKeys(data);
+        }
+      } catch (_) { /* shown in keysErr */ }
+    });
+
+    $("saveApiKey").addEventListener("click", async () => {
+      const value = $("apiKeyInput").value.trim();
+      if (!value) {
+        showKeysErr("Paste or generate an API key first.");
+        return;
+      }
+      try {
+        await keysAction("PUT", "/v1/keys/api-key", { value });
+        rememberApiKey(value);
+        $("apiKeyReveal").hidden = false;
+        $("apiKeyReveal").textContent = "API key saved to SQLite.";
+      } catch (_) { /* shown */ }
+    });
+
+    $("clearApiKey").addEventListener("click", async () => {
+      if (!confirm("Clear the API key? Predict and tunnel will be open until you set a new one.")) return;
+      try {
+        await keysAction("DELETE", "/v1/keys/api-key");
+        rememberApiKey("");
+        $("apiKeyInput").value = "";
+      } catch (_) { /* shown */ }
+    });
+
+    $("copyApiKey").addEventListener("click", async () => {
+      if (!storedApiKey) {
+        showKeysErr("No key in this browser session. Generate or paste+save, then copy.");
+        return;
+      }
+      await navigator.clipboard.writeText(storedApiKey);
+      $("copyApiKey").textContent = "Copied";
+      setTimeout(() => { $("copyApiKey").textContent = "Copy stored"; }, 1200);
+    });
+
+    $("saveNgrokToken").addEventListener("click", async () => {
+      const value = $("ngrokTokenInput").value.trim();
+      if (!value) {
+        showKeysErr("Paste an ngrok authtoken first.");
+        return;
+      }
+      try {
+        await keysAction("PUT", "/v1/keys/ngrok-token", { value });
+        $("ngrokTokenInput").value = "";
+        $("apiKeyReveal").hidden = false;
+        $("apiKeyReveal").textContent = "ngrok authtoken saved to SQLite.";
+      } catch (_) { /* shown */ }
+    });
+
+    $("clearNgrokToken").addEventListener("click", async () => {
+      if (!confirm("Clear the stored ngrok authtoken?")) return;
+      try {
+        await keysAction("DELETE", "/v1/keys/ngrok-token");
+      } catch (_) { /* shown */ }
     });
 
     $("startTunnel").addEventListener("click", () => tunnelAction("/v1/tunnel/start"));

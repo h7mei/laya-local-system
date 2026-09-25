@@ -58,7 +58,7 @@ Optional flags (same on both):
 --models english,multilingual
 ```
 
-Open [http://127.0.0.1:8000/](http://127.0.0.1:8000/) for the request builder UI, or [http://127.0.0.1:8000/api](http://127.0.0.1:8000/api) for API integration docs, copyable snippets, and ngrok controls.
+Open [http://127.0.0.1:8000/](http://127.0.0.1:8000/) for the request builder UI, [http://127.0.0.1:8000/api](http://127.0.0.1:8000/api) for API integration docs / key + ngrok controls, or [http://127.0.0.1:8000/monitor](http://127.0.0.1:8000/monitor) for usage stats (SQLite-backed request log).
 
 Defaults (override in `.env`):
 
@@ -73,14 +73,16 @@ Defaults (override in `.env`):
 | `LAYA_API_KEY` | _(unset)_ | If set, require `Authorization: Bearer` on predict |
 | `NGROK_AUTHTOKEN` | _(unset)_ | ngrok token for public tunnels |
 | `LAYA_NGROK` | `0` | Set `1` to auto-start ngrok when the server boots |
+| `LAYA_USAGE_DB` | `data/usage.sqlite` | SQLite file for `/monitor` usage stats |
 
 ## Public URL (ngrok)
 
-1. Get a token from [ngrok dashboard](https://dashboard.ngrok.com/get-started/your-authtoken).
-2. Add to `.env`: `NGROK_AUTHTOKEN=...` and optionally `LAYA_NGROK=1`.
-3. Restart the server, or open `/api` and click **Start ngrok**.
+1. Open [http://127.0.0.1:8000/api](http://127.0.0.1:8000/api) → **Keys (SQLite)**.
+2. Click **Generate** for an API key (recommended before tunneling).
+3. Paste your ngrok authtoken from the [ngrok dashboard](https://dashboard.ngrok.com/get-started/your-authtoken) and **Save token**.
+4. Click **Start ngrok**, or set `LAYA_NGROK=1` in `.env` and restart the server.
 
-`GET /v1/integration` returns the local and public base URLs for clients.
+Keys are stored in `data/usage.sqlite` (same DB as usage stats). `.env` values for `LAYA_API_KEY` / `NGROK_AUTHTOKEN` are imported once if the DB rows are empty.
 ## Health check
 
 ```powershell
@@ -154,9 +156,18 @@ curl -s http://127.0.0.1:8000/v1/systemone \
 ## Endpoints
 
 - `GET /` — playground UI
-- `GET /api` — API integration guide + ngrok controls
+- `GET /api` — API integration guide + keys + ngrok controls
+- `GET /monitor` — usage monitor (totals, by day/model, recent requests)
 - `GET /health` — process status and loaded checkpoints
 - `GET /v1/integration` — local/public base URL and tunnel status
+- `GET /v1/keys` — masked API key / ngrok token status
+- `POST /v1/keys/api-key/generate` — generate API key into SQLite
+- `PUT /v1/keys/api-key` — set API key
+- `DELETE /v1/keys/api-key` — clear API key
+- `PUT /v1/keys/ngrok-token` — set ngrok authtoken
+- `DELETE /v1/keys/ngrok-token` — clear ngrok authtoken
+- `GET /v1/usage` — SQLite usage aggregates + recent rows
+- `POST /v1/usage/clear` — wipe usage log (uses API key when set)
 - `POST /v1/tunnel/start` — open ngrok tunnel
 - `POST /v1/tunnel/stop` — close ngrok tunnel
 - `POST /v1/systemone` — decide over `state` + typed `questions`
