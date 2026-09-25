@@ -220,6 +220,39 @@ button.ghost:hover { background: #fff; }
   margin: 0.75rem 0 0;
 }
 
+.snippet-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.75rem 0 0;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.45rem;
+}
+.snippet-tabs [role="tab"] {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  padding: 0.35rem 0.7rem;
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+}
+.snippet-tabs [role="tab"]:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.55);
+}
+.snippet-tabs [role="tab"][aria-selected="true"] {
+  color: var(--accent-ink);
+  border-color: var(--line);
+  border-bottom-color: #fff;
+  background: #fff;
+}
+.snippet-panels [role="tabpanel"][hidden] {
+  display: none;
+}
 .code-block {
   position: relative;
   margin: 0.55rem 0 0;
@@ -232,15 +265,18 @@ button.ghost:hover { background: #fff; }
 .code-block pre {
   margin: 0;
   padding: 0.85rem 0.9rem;
+  padding-top: 2.4rem;
   font-family: var(--font-mono);
   font-size: 0.78rem;
   line-height: 1.45;
-  white-space: pre;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .code-block .copy {
   position: absolute;
   top: 0.45rem;
   right: 0.45rem;
+  z-index: 1;
   padding: 0.3rem 0.55rem;
   font-size: 0.75rem;
   border-radius: 6px;
@@ -248,6 +284,9 @@ button.ghost:hover { background: #fff; }
   background: rgba(255,255,255,0.08);
   color: #fff;
   cursor: pointer;
+}
+.code-block .copy:hover {
+  background: rgba(255,255,255,0.16);
 }
 .url-line {
   font-family: var(--font-mono);

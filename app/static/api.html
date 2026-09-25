@@ -14,7 +14,7 @@
   <div class="wrap">
     <header>
       <h1 class="brand">Laya</h1>
-      <p class="lede">Wire your app to this local System One API — copy snippets below, or open a public ngrok URL for remote clients.</p>
+      <p class="lede">Wire your app to this local System One API — copy agent instructions or code snippets, or open a public ngrok URL for remote clients.</p>
       <nav class="nav" aria-label="Primary">
         <a href="/">Playground</a>
         <a class="active" href="/api">API integration</a>
@@ -29,7 +29,7 @@
     <div class="layout">
       <section class="panel stack">
         <h2>How to call the API</h2>
-        <p class="hint" style="margin-top:0">Base URL for examples updates live from this server (local or ngrok).</p>
+        <p class="hint" style="margin-top:0">Base URL updates live (local or ngrok). Use <strong>Agent</strong> to paste instructions into Cursor/Claude/Codex; other tabs are runnable snippets.</p>
 
         <dl class="kv">
           <dt>Local</dt>
@@ -42,32 +42,41 @@
           <dd id="authStatus">…</dd>
         </dl>
 
-        <h3>1. Health check</h3>
-        <div class="code-block">
-          <button type="button" class="copy" data-copy="curlHealth">Copy</button>
-          <pre id="curlHealth"></pre>
+        <p class="hint" style="margin-top:0">Body: <code>state</code> (any JSON / text) + <code>questions</code> (choice / score / noul). Optional <code>model</code>: english, multilingual, typed-decisions. If an API key is configured, send <code>Authorization: Bearer &lt;key&gt;</code>.</p>
+
+        <div class="snippet-tabs" role="tablist" aria-label="Snippet format">
+          <button type="button" role="tab" id="tab-agent" aria-controls="panel-agent" aria-selected="true" data-tab="agent">Agent</button>
+          <button type="button" role="tab" id="tab-curl" aria-controls="panel-curl" aria-selected="false" data-tab="curl">curl</button>
+          <button type="button" role="tab" id="tab-js" aria-controls="panel-js" aria-selected="false" data-tab="js">JavaScript</button>
+          <button type="button" role="tab" id="tab-ps" aria-controls="panel-ps" aria-selected="false" data-tab="ps">PowerShell</button>
         </div>
 
-        <h3>2. Predict — POST /v1/systemone</h3>
-        <p class="hint">Body: <code>state</code> (any JSON / text) + <code>questions</code> (choice / score / noul). Optional <code>model</code>: english, multilingual, typed-decisions.</p>
-        <div class="code-block">
-          <button type="button" class="copy" data-copy="curlPredict">Copy</button>
-          <pre id="curlPredict"></pre>
+        <div class="snippet-panels">
+          <div role="tabpanel" id="panel-agent" aria-labelledby="tab-agent">
+            <div class="code-block">
+              <button type="button" class="copy" data-copy="agentBrief" data-label="Copy for agent">Copy for agent</button>
+              <pre id="agentBrief"></pre>
+            </div>
+          </div>
+          <div role="tabpanel" id="panel-curl" aria-labelledby="tab-curl" hidden>
+            <div class="code-block">
+              <button type="button" class="copy" data-copy="curlPredict" data-label="Copy">Copy</button>
+              <pre id="curlPredict"></pre>
+            </div>
+          </div>
+          <div role="tabpanel" id="panel-js" aria-labelledby="tab-js" hidden>
+            <div class="code-block">
+              <button type="button" class="copy" data-copy="jsFetch" data-label="Copy">Copy</button>
+              <pre id="jsFetch"></pre>
+            </div>
+          </div>
+          <div role="tabpanel" id="panel-ps" aria-labelledby="tab-ps" hidden>
+            <div class="code-block">
+              <button type="button" class="copy" data-copy="psPredict" data-label="Copy">Copy</button>
+              <pre id="psPredict"></pre>
+            </div>
+          </div>
         </div>
-
-        <h3>3. JavaScript fetch</h3>
-        <div class="code-block">
-          <button type="button" class="copy" data-copy="jsFetch">Copy</button>
-          <pre id="jsFetch"></pre>
-        </div>
-
-        <h3>4. PowerShell</h3>
-        <div class="code-block">
-          <button type="button" class="copy" data-copy="psPredict">Copy</button>
-          <pre id="psPredict"></pre>
-        </div>
-
-        <p class="hint">If <code>LAYA_API_KEY</code> is set, send <code>Authorization: Bearer &lt;key&gt;</code> on predict (and tunnel start/stop).</p>
       </section>
 
       <div class="stack">
@@ -209,19 +218,12 @@
       $("copyApiKey").disabled = !storedApiKey;
     }
 
-    function authHeaderLines(forCurl) {
-      if (!info.auth_required) return { curl: "", js: "", ps: "" };
-      if (forCurl) {
-        return {
-          curl: ` \\\n  -H "Authorization: Bearer $LAYA_API_KEY"`,
-          js: `,\n    headers: {\n      "content-type": "application/json",\n      "authorization": "Bearer " + apiKey\n    }`,
-          ps: `\n$headers["Authorization"] = "Bearer $env:LAYA_API_KEY"`
-        };
-      }
+    function authHeaderLines() {
+      if (!info.auth_required) return { curl: "", jsAuth: "", ps: "" };
       return {
         curl: ` \\\n  -H "Authorization: Bearer $LAYA_API_KEY"`,
-        js: "",
-        ps: ""
+        jsAuth: ',\n    "authorization": "Bearer " + apiKey',
+        ps: `\n$headers["Authorization"] = "Bearer $env:LAYA_API_KEY"`
       };
     }
 
@@ -249,9 +251,39 @@
 }`;
     }
 
+    function agentBrief(base) {
+      const authBlock = info.auth_required
+        ? `Auth: required. Send header Authorization: Bearer <LAYA_API_KEY>.
+Do not invent a key — ask the user for LAYA_API_KEY if missing.`
+        : `Auth: none required right now (no API key configured). Prefer supporting an optional Authorization: Bearer <key> header anyway.`;
+
+      return `You are integrating with Laya Local System One — a local decision API (choice / score / noul).
+
+Base URL (use this): ${base}
+Health: GET ${base}/health
+Predict: POST ${base}/v1/systemone
+Content-Type: application/json
+
+${authBlock}
+
+Request body shape:
+- state: any JSON object or string (context for the model)
+- questions: object map; each question has type "choice" | "score" | "noul", plus instructions
+- choice questions also need criteria: { optionId: "description", ... }
+- optional model: "english" | "multilingual" | "typed-decisions"
+
+Example POST body:
+${sampleBody()}
+
+Success response includes answers keyed by question id (value + scores/confidence depending on type).
+On failure, surface HTTP status and response body; do not retry blindly.
+
+Wire the caller to POST ${base}/v1/systemone with the schema above. Keep the base URL configurable.`;
+    }
+
     function renderSnippets() {
       const base = info.effective_base_url || window.location.origin;
-      const auth = authHeaderLines(true);
+      const auth = authHeaderLines();
 
       $("localUrl").textContent = info.base_url || window.location.origin;
       $("publicUrl").textContent = info.public_url || "not running";
@@ -260,19 +292,26 @@
         ? "required (Authorization: Bearer …)"
         : "none (generate an API key on this page to require a bearer token)";
 
-      $("curlHealth").textContent = `curl -s ${base}/health`;
+      $("agentBrief").textContent = agentBrief(base);
 
       $("curlPredict").textContent =
-`curl -s ${base}/v1/systemone \\
+`# health
+curl -s ${base}/health
+
+# predict
+curl -s ${base}/v1/systemone \\
   -H "Content-Type: application/json"${auth.curl} \\
   -d '${sampleBody().replaceAll("\n", "\n  ")}'`;
 
       $("jsFetch").textContent =
 `const base = ${JSON.stringify(base)};
-${info.auth_required ? 'const apiKey = process.env.LAYA_API_KEY; // or paste key\n' : ""}const res = await fetch(base + "/v1/systemone", {
+${info.auth_required ? 'const apiKey = process.env.LAYA_API_KEY; // or paste key\n' : ""}const health = await fetch(base + "/health");
+console.log(await health.json());
+
+const res = await fetch(base + "/v1/systemone", {
   method: "POST",
   headers: {
-    "content-type": "application/json"${info.auth_required ? ',\n    "authorization": "Bearer " + apiKey' : ""}
+    "content-type": "application/json"${info.auth_required ? auth.jsAuth : ""}
   },
   body: JSON.stringify({
     state: {
@@ -301,7 +340,8 @@ console.log(data.answers);`;
 
       $("psPredict").textContent =
 `$base = "${base}"
-$headers = @{ "Content-Type" = "application/json" }${info.auth_required ? '\n$headers["Authorization"] = "Bearer $env:LAYA_API_KEY"' : ""}
+Invoke-RestMethod "$base/health"
+$headers = @{ "Content-Type" = "application/json" }${info.auth_required ? auth.ps : ""}
 $body = @'
 ${sampleBody()}
 '@
@@ -324,6 +364,20 @@ Invoke-RestMethod "$base/v1/systemone" -Method Post -Headers $headers -Body $bod
 
       renderKeys(info.keys);
     }
+
+    function selectSnippetTab(name) {
+      document.querySelectorAll(".snippet-tabs [role='tab']").forEach((tab) => {
+        const on = tab.getAttribute("data-tab") === name;
+        tab.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      document.querySelectorAll(".snippet-panels [role='tabpanel']").forEach((panel) => {
+        panel.hidden = panel.id !== "panel-" + name;
+      });
+    }
+
+    document.querySelectorAll(".snippet-tabs [role='tab']").forEach((tab) => {
+      tab.addEventListener("click", () => selectSnippetTab(tab.getAttribute("data-tab")));
+    });
 
     async function refreshHealth() {
       try {
@@ -411,14 +465,15 @@ Invoke-RestMethod "$base/v1/systemone" -Method Post -Headers $headers -Body $bod
     document.querySelectorAll(".copy").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const id = btn.getAttribute("data-copy");
+        const label = btn.getAttribute("data-label") || "Copy";
         const text = $(id).textContent;
         try {
           await navigator.clipboard.writeText(text);
           btn.textContent = "Copied";
-          setTimeout(() => { btn.textContent = "Copy"; }, 1200);
+          setTimeout(() => { btn.textContent = label; }, 1200);
         } catch (e) {
           btn.textContent = "Failed";
-          setTimeout(() => { btn.textContent = "Copy"; }, 1200);
+          setTimeout(() => { btn.textContent = label; }, 1200);
         }
       });
     });
@@ -499,6 +554,7 @@ Invoke-RestMethod "$base/v1/systemone" -Method Post -Headers $headers -Body $bod
       setTimeout(() => { $("copyPublic").textContent = "Copy public URL"; }, 1200);
     });
 
+    selectSnippetTab("agent");
     renderSnippets();
     refreshHealth();
     refreshIntegration();
